@@ -44,7 +44,7 @@ HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8080"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 MODEL_NAME = os.getenv("MODEL_NAME", "llama3.2:3b")
-PRESENTATION_MODEL = os.getenv("PRESENTATION_MODEL", "qwen2.5:7b")
+PRESENTATION_MODEL = os.getenv("PRESENTATION_MODEL", os.getenv("MODEL_NAME", "llama3.2:3b"))
 DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
 MAX_CONCURRENT_REQUESTS = int(os.getenv("MAX_CONCURRENT_REQUESTS", "10"))
 OLLAMA_NUM_PARALLEL = int(os.getenv("OLLAMA_NUM_PARALLEL", "5"))
@@ -344,23 +344,35 @@ def ollama_chat(
     model: str = MODEL_NAME,
     document_context: dict | None = None,
     history: list[dict] | None = None,
+    is_presentation_plan: bool = False,
+    system_override: str | None = None,
 ) -> str:
-    system_prompt = (
-        "Eres CIRCE Local AI, el asistente inteligente de élite de Fundación CIRCE (Centro Tecnológico).\n"
-        f"Área actual de trabajo: {use_case}.\n"
-        "CAPACIDADES CLAVE:\n"
-        "- Capacidad analítica rigurosa en transición energética, sostenibilidad, industria e innovación tecnológica.\n"
-        "- Cuando redactes documentos o informes técnicos, usa formato Markdown enriquecido con títulos (#), "
-        "subtítulos (##, ###), listas estructuradas con viñetas, tablas comparativas y un apartado claro de conclusiones ejecutivas y pasos de acción.\n"
-        "- Si el usuario solicita un documento o exportación a Word, redacta el contenido con estructura formal ejecutiva.\n"
-        "- Si se adjunta un documento, analiza detalladamente sus datos, citas numéricas y metodología sin inventar hechos.\n"
-        "- Si el usuario pide una presentación o diapositivas, resume en ideas clave con métricas cuantitativas e impacto directo.\n"
-        "- Responde siempre en español, con lenguaje profesional, preciso y directo."
-    )
+    if is_presentation_plan:
+        system_prompt = (
+            "Eres un experto diseñador y consultor de presentaciones ejecutivas. "
+            "Debes responder EXCLUSIVAMENTE con un objeto JSON válido con la estructura solicitada, "
+            "sin bloques de código markdown (```json), sin texto antes ni después. "
+            "Todas las diapositivas, títulos, subtítulos, puntos y métricas deben ser pertinentes y estar redactados en español con rigor profesional."
+        )
+    elif system_override:
+        system_prompt = system_override
+    else:
+        system_prompt = (
+            "Eres CIRCE Local AI, el asistente inteligente de élite de Fundación CIRCE (Centro Tecnológico).\n"
+            f"Área actual de trabajo: {use_case}.\n"
+            "CAPACIDADES CLAVE:\n"
+            "- Capacidad analítica rigurosa en transición energética, sostenibilidad, industria e innovación tecnológica.\n"
+            "- Cuando redactes documentos o informes técnicos, usa formato Markdown enriquecido con títulos (#), "
+            "subtítulos (##, ###), listas estructuradas con viñetas, tablas comparativas y un apartado claro de conclusiones ejecutivas y pasos de acción.\n"
+            "- Si el usuario solicita un documento o exportación a Word, redacta el contenido con estructura formal ejecutiva.\n"
+            "- Si se adjunta un documento, analiza detalladamente sus datos, citas numéricas y metodología sin inventar hechos.\n"
+            "- Si el usuario pide una presentación o diapositivas, resume en ideas clave con métricas cuantitativas e impacto directo.\n"
+            "- Responde siempre en español, con lenguaje profesional, preciso y directo."
+        )
 
     ollama_messages = [{"role": "system", "content": system_prompt}]
 
-    if history:
+    if history and not is_presentation_plan:
         for turn in history[-6:]:
             role = turn.get("role", "user")
             content = turn.get("content", "")
@@ -368,7 +380,7 @@ def ollama_chat(
                 ollama_messages.append({"role": role, "content": content})
 
     user_content = message
-    if document_context and document_context.get("text"):
+    if document_context and document_context.get("text") and not is_presentation_plan:
         doc_name = document_context.get("filename", "documento")
         doc_words = document_context.get("word_count", 0)
         doc_pages = document_context.get("page_count", 1)
@@ -383,16 +395,145 @@ def ollama_chat(
     if not (ollama_messages and ollama_messages[-1].get("role") == "user" and ollama_messages[-1].get("content") == user_content):
         ollama_messages.append({"role": "user", "content": user_content})
 
-    payload = json.dumps(
-        {
-            "model": model,
-            "stream": False,
-            "messages": ollama_messages,
+    payload_dict = {
+        "model": model,
+        "stream": False,
+        "messages": ollama_messages,
+    }
+    timeout_secs = 60
+    if is_presentation_plan:
+        payload_dict["format"] = "json"
+        payload_dict["options"] = {
+            "temperature": 0.2,
+            "num_predict": 750,
         }
-    ).encode("utf-8")
+        timeout_secs = 180
+
+    payload = json.dumps(payload_dict).encode("utf-8")
     request = Request(f"{OLLAMA_URL}/api/chat", data=payload, headers={"Content-Type": "application/json"})
-    with urlopen(request, timeout=35) as response:
+    with urlopen(request, timeout=timeout_secs) as response:
         return json.loads(response.read().decode("utf-8"))["message"]["content"]
+
+
+def clean_conversational_topic(message: str) -> str:
+    cleaned = message.strip()
+    patterns = [
+        r"^(?:por favor\s*)?(?:convi[eé]rtelo\s+en|haz(?:me)?|crea|genera|prepara|diseña|p[aá]salo\s+a)\s+(?:una\s+)?(?:nueva\s+)?(?:presentaci[oó]n|diapositivas|powerpoint|pptx|slides)(?:\s+(?:ejecutiva|completa))?(?:\s+(?:sobre|de|acerca de|para))?\s*",
+        r"^(?:presentaci[oó]n|diapositivas|powerpoint|pptx|slides)(?:\s+(?:sobre|de|acerca de|para))\s*",
+        r"^(?:quiero\s+que\s+(?:hagas|crees)|me\s+gustar[ií]a\s+tener)\s+(?:una\s+)?(?:presentaci[oó]n|diapositivas|powerpoint|pptx)(?:\s+(?:sobre|de))?\s*",
+        r"^(?:dame|mu[eé]strame)\s+(?:una\s+)?(?:presentaci[oó]n|diapositivas)(?:\s+(?:sobre|de))?\s*",
+        r"^(?:un\s+tema\s+random\s+como\s+|un\s+ejemplo\s+como\s+|por\s+ejemplo\s+)",
+        r"^(?:sobre|de|acerca de)\s+",
+    ]
+    for pat in patterns:
+        cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE).strip()
+    
+    # Strip prompt prefix if accidentally passed
+    if "devuelve solo json" in cleaned.lower() or "esquema exacto" in cleaned.lower():
+        m = re.search(r"sobre este tema:\s*['\"]([^'\"]+)['\"]", cleaned, re.IGNORECASE)
+        if m:
+            cleaned = m.group(1).strip()
+        else:
+            m2 = re.search(r"tema:\s*['\"]([^'\"]+)['\"]", cleaned, re.IGNORECASE)
+            if m2:
+                cleaned = m2.group(1).strip()
+
+    if cleaned:
+        cleaned = cleaned[0].upper() + cleaned[1:]
+    return cleaned if len(cleaned) > 1 else message
+
+
+def build_contextual_fallback_slides(topic: str, preferences: dict | None = None, document_context: dict | None = None) -> list[dict]:
+    clean = clean_conversational_topic(topic)
+    tl = clean.lower()
+    
+    # 1. Gastronomía, cocina, repostería
+    if any(k in tl for k in ("tarta", "cocina", "receta", "queso", "pastel", "comida", "cocinar", "postre", "plato", "gastronom", "ingrediente")):
+        return [
+            {"layout": "cover", "title": clean, "subtitle": "Guía práctica paso a paso para un resultado perfecto", "category": "GASTRONOMÍA & RECETAS"},
+            {"layout": "agenda", "title": "Estructura de la Receta", "items": ["Selección de Ingredientes", "Preparación de la Base", "Elaboración del Relleno", "Horneado y Degustación"]},
+            {"layout": "cards", "title": "Ingredientes y Claves", "cards": [
+                {"title": "Base Crujiente", "bullets": ["200g de galletas trituradas", "80g de mantequilla derretida"]},
+                {"title": "Relleno Cremoso", "bullets": ["500g de queso crema de calidad", "3 huevos frescos y 200ml de nata"]},
+                {"title": "Aroma y Toque Final", "bullets": ["1 cucharadita de extracto de vainilla", "120g de azúcar glas"]}
+            ]},
+            {"layout": "steps", "title": "Elaboración Paso a Paso", "steps": [
+                {"step": "01", "title": "Preparar la Base", "desc": "Mezcla la galleta con mantequilla y compacta firmemente en la base del molde."},
+                {"step": "02", "title": "Batir el Relleno", "desc": "Bate suavemente el queso con azúcar, huevos y nata sin meter demasiado aire."},
+                {"step": "03", "title": "Horneado Controlado", "desc": "Hornea a 170°C durante 40-45 min hasta que los bordes cuajen y el centro baile levemente."},
+                {"step": "04", "title": "Reposo & Enfriado", "desc": "Deja atemperar en el horno apagado y refrigera un mínimo de 4 horas antes de servir."}
+            ]},
+            {"kind": "closing", "layout": "closing", "title": "Degustación y Consejos", "subtitle": "¡Disfruta de una tarta casera irresistible!", "bullets": [
+                "Desmolda siempre con la tarta completamente fría.",
+                "Acompaña con coulis casero de frutos rojos o mermelada.",
+                "Conserva en frío hasta 4 días para mantener textura óptima."
+            ]}
+        ]
+
+    # 2. Tecnología, software, IA y datos
+    if any(k in tl for k in ("ia", "ai", "software", "tecnolog", "modelo", "datos", "digital", "código", "python", "docker", "red")):
+        return [
+            {"layout": "cover", "title": clean, "subtitle": "Arquitectura, despliegue y mejores prácticas técnicas", "category": "TECNOLOGÍA & INNOVACIÓN"},
+            {"layout": "agenda", "title": "Agenda Técnica", "items": ["Contexto y Diagnóstico", "Arquitectura Propuesta", "Métricas de Rendimiento", "Plan de Despliegue"]},
+            {"layout": "cards", "title": "Pilares Arquitectónicos", "cards": [
+                {"title": "Infraestructura Local", "bullets": [f"Ejecución eficiente para {clean[:25]}", "Sin dependencias de nube pública"]},
+                {"title": "Gobernanza & Seguridad", "bullets": ["Privacidad integral de datos", "Control estricto de accesos y logs"]},
+                {"title": "Escalabilidad", "bullets": ["Soporte de peticiones paralelas", "Optimización de memoria y CPU"]}
+            ]},
+            {"layout": "steps", "title": "Hoja de Ruta de Implementación", "steps": [
+                {"step": "01", "title": "Validación de Entorno", "desc": "Comprobación de recursos, dependencias y configuración de contenedores."},
+                {"step": "02", "title": "Despliegue y Pruebas", "desc": "Puesta en marcha de servicios y verificación de latencias en banco de pruebas."},
+                {"step": "03", "title": "Pase a Producción", "desc": "Monitorización continua con panel de métricas en tiempo real."}
+            ]},
+            {"kind": "closing", "layout": "closing", "title": "Conclusiones Técnicas", "subtitle": f"Hitos clave alcanzados en {clean[:35]}", "bullets": [
+                "Infraestructura validada y operativa.",
+                "Cumplimiento total de requisitos de rendimiento.",
+                "Soporte continuo y monitorización activa."
+            ]}
+        ]
+
+    # 3. Energía, sostenibilidad y transición ecológica
+    if any(k in tl for k in ("energ", "sostenib", "circe", "solar", "fotovolt", "emision", "renovable", "descarboniz")):
+        return [
+            {"layout": "cover", "title": clean, "subtitle": "Estrategia de innovación, descarbonización y eficiencia", "category": "TRANSICIÓN ENERGÉTICA"},
+            {"layout": "agenda", "title": "Agenda Estratégica", "items": ["Diagnóstico Energético", "Solución Tecnológica", "Métricas Cuantitativas", "Hoja de Ruta"]},
+            {"layout": "stats", "title": "Indicadores de Rendimiento", "subtitle": "Impacto cuantitativo estimado en la operación", "stats": [
+                {"value": "-35%", "label": "Consumo Energético", "desc": "Reducción directa de demanda en procesos clave."},
+                {"value": "100%", "label": "Soberanía y Control", "desc": "Gestión autónoma y cumplimiento normativo."},
+                {"value": "2.5x", "label": "Retorno Estimado", "desc": "Optimización económica y amortización en corto plazo."}
+            ]},
+            {"layout": "steps", "title": "Plan de Transición", "steps": [
+                {"step": "01", "title": "Auditoría Inicial", "desc": "Medición de consumos y detección de ineficiencias críticas."},
+                {"step": "02", "title": "Implantación de Medidas", "desc": "Integración de tecnologías de generación y optimización."},
+                {"step": "03", "title": "Monitorización y Verificación", "desc": "Seguimiento cuantitativo de ahorro y descarbonización."}
+            ]},
+            {"kind": "closing", "layout": "closing", "title": "Próximos Pasos", "subtitle": "Calendario de hitos y acuerdos de colaboración", "bullets": [
+                "Validación de especificaciones técnicas finales.",
+                "Presentación de resultados a dirección.",
+                "Inicio de la fase de ejecución en planta."
+            ]}
+        ]
+
+    # 4. Fallback contextual universal para cualquier otro tema
+    return [
+        {"layout": "cover", "title": clean, "subtitle": f"Análisis estructurado y guía ejecutiva: {clean[:40]}", "category": "INFORME ESTRATÉGICO"},
+        {"layout": "agenda", "title": "Estructura del Documento", "items": [f"Introducción a {clean[:25]}", "Fundamentos y Claves", "Metodología y Pasos", "Conclusiones y Recomendaciones"]},
+        {"layout": "cards", "title": "Ejes Fundamentales", "cards": [
+            {"title": "Objetivos Principales", "bullets": [f"Comprensión global de {clean[:25]}", "Identificación de factores de éxito"]},
+            {"title": "Buenas Prácticas", "bullets": ["Planificación rigurosa previa", "Control de calidad en cada etapa"]},
+            {"title": "Impacto y Valor", "bullets": ["Optimización de resultados", "Aplicación práctica inmediata"]}
+        ]},
+        {"layout": "steps", "title": "Metodología y Pasos Clave", "steps": [
+            {"step": "01", "title": "Fase de Preparación", "desc": f"Recopilación de información y definición del enfoque para {clean[:25]}."},
+            {"step": "02", "title": "Desarrollo y Ejecución", "desc": "Aplicación secuencial siguiendo las pautas recomendadas."},
+            {"step": "03", "title": "Revisión y Ajustes", "desc": "Evaluación del resultado final y optimización de detalles."}
+        ]},
+        {"kind": "closing", "layout": "closing", "title": "Conclusiones Finales", "subtitle": f"Puntos esenciales para recordar sobre {clean[:35]}", "bullets": [
+            "La preparación previa es determinante para el éxito.",
+            "Seguir los pasos ordenados garantiza resultados consistentes.",
+            "Revisar y adaptar según el contexto específico."
+        ]}
+    ]
 
 
 def generate_smart_circe_response(
@@ -404,34 +545,9 @@ def generate_smart_circe_response(
 ) -> str:
     """Generador técnico contextual de alto nivel para cuando no hay conexión a API en la nube u Ollama local."""
     if is_presentation_plan:
-        return json.dumps({
-            "slides": [
-                {"layout": "cover", "title": message[:70], "subtitle": "Estrategia ejecutiva y análisis cuantitativo para CIRCE"},
-                {"layout": "agenda", "title": "Agenda y Enfoque Estratégico", "items": ["Diagnóstico de Requisitos", "Propuesta Tecnológica", "Métricas de Impacto", "Cronograma de Fases"]},
-                {"layout": "stats", "title": "Métricas Clave de Rendimiento", "subtitle": "Indicadores cuantitativos de impacto directo", "stats": [
-                    {"value": "-35%", "label": "Demanda Energética", "desc": "Reducción estimada en consumo tras la optimización."},
-                    {"value": "100%", "label": "Privacidad Local", "desc": "Gobernanza y seguridad total de los datos."},
-                    {"value": "2.8x", "label": "Agilidad Técnica", "desc": "Aceleración de análisis y toma de decisiones."}
-                ]},
-                {"layout": "comparison", "title": "Comparativa de Escenarios", "subtitle": "Estado actual vs Solución Tecnológica CIRCE", "bullets": [
-                    "Procesos manuales y dependencia de servicios en la nube con coste recurrente.",
-                    "Riesgo de fuga de información y latencia en consultas técnicas complejas.",
-                    "Arquitectura local de alta concurrencia con semáforos de capacidad.",
-                    "Generación automática de entregables ejecutivos en Word y PowerPoint."
-                ]},
-                {"layout": "cards", "title": "Ejes Estratégicos de Innovación", "subtitle": "Pilares fundamentales para la adopción tecnológica", "cards": [
-                    {"title": "Arquitectura Local", "bullets": ["Inferencia cuantizada", "Concurrencia multihilo"]},
-                    {"title": "Gobernanza & Seguridad", "bullets": ["Sin telemetría externa", "Conexión segura vía túnel"]},
-                    {"title": "Impacto Operativo", "bullets": ["Documentos Word corporativos", "Diapositivas PPTX ejecutivas"]}
-                ]},
-                {"layout": "steps", "title": "Plan de Implementación y Fases", "subtitle": "Cronograma de ejecución estructurado", "steps": [
-                    {"step": "01", "title": "Diagnóstico y Requisitos", "desc": "Mapeo de datos y validación de casos prioritarios."},
-                    {"step": "02", "title": "Validación en Piloto", "desc": "Despliegue en banco de pruebas con equipos técnicos."},
-                    {"step": "03", "title": "Escalado Transversal", "desc": "Adopción operativa con monitorización continua."}
-                ]},
-                {"kind": "closing", "layout": "closing", "title": "Conclusiones y Próximos Pasos", "subtitle": "Preguntas, debate y calendario de hitos"}
-            ]
-        })
+        topic = clean_conversational_topic(message)
+        slides = build_contextual_fallback_slides(topic, {}, document_context)
+        return json.dumps({"slides": slides})
 
     # Si hay documento adjunto, resumir sus contenidos reales extraídos
     if document_context and document_context.get("text"):
@@ -500,7 +616,7 @@ def unified_ai_chat(
     if not DEMO_MODE:
         try:
             m = PRESENTATION_MODEL if is_presentation_plan else MODEL_NAME
-            return ollama_chat(message, use_case, m, document_context, history)
+            return ollama_chat(message, use_case, m, document_context, history, is_presentation_plan=is_presentation_plan)
         except Exception as e:
             print(f"[!] Ollama error: {e}")
 
@@ -913,17 +1029,22 @@ def create_presentation(topic: str, slides: list[dict], preferences: dict) -> st
             add_text(slide, "FUNDACIÓN CIRCE", 1.6, 0.82, 5.5, 0.3, 14, "FFFFFF", True)
             add_text(slide, "CENTRO TECNOLÓGICO · LOCAL AI LAB", 1.6, 1.15, 5.5, 0.25, 9, theme["secondary"], True)
 
-            cat_pill = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.9), Inches(2.05), Inches(3.4), Inches(0.35))
+            clean_topic = clean_conversational_topic(topic)
+            title_text = str(slide_data.get("title") or clean_topic)
+            if any(bad in title_text.lower() for bad in ["devuelve", "json", "valido", "esquema"]):
+                title_text = clean_topic
+
+            cat_pill = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.9), Inches(2.05), Inches(3.8), Inches(0.35))
             cat_pill.fill.solid()
             cat_pill.fill.fore_color.rgb = color(theme["accent"])
             cat_pill.line.fill.background()
-            add_text(slide, "INFORME ESTRATÉGICO Y TECNOLÓGICO", 0.9, 2.1, 3.4, 0.28, 9, "FFFFFF", True, align=PP_ALIGN.CENTER)
+            cat_text = str(slide_data.get("category") or preferences.get("category") or "INFORME & PRESENTACIÓN").upper()
+            add_text(slide, cat_text, 0.9, 2.1, 3.8, 0.28, 9, "FFFFFF", True, align=PP_ALIGN.CENTER)
 
-            title_text = str(slide_data.get("title", topic))
-            add_text(slide, title_text, 0.9, 2.65, 6.2, 2.2, 34, "FFFFFF", True, font="Georgia")
+            add_text(slide, title_text, 0.9, 2.65, 6.2, 2.2, 32, "FFFFFF", True, font="Georgia")
 
-            sub_text = str(slide_data.get("subtitle", "Síntesis ejecutiva y análisis cuantitativo"))
-            add_text(slide, sub_text, 0.9, 4.95, 6.2, 1.1, 15, theme["secondary"])
+            sub_text = str(slide_data.get("subtitle") or f"Síntesis ejecutiva y análisis detallado sobre {clean_topic[:35]}")
+            add_text(slide, sub_text, 0.9, 4.95, 6.2, 1.1, 14, theme["secondary"])
 
             add_text(slide, "PROCESAMIENTO 100% LOCAL  ·  CONFIDENCIALIDAD CIRCE GARANTIZADA", 0.9, 6.45, 6.2, 0.35, 9, theme["highlight"], True)
 
@@ -937,15 +1058,23 @@ def create_presentation(topic: str, slides: list[dict], preferences: dict) -> st
             tab.fill.fore_color.rgb = color(theme["accent"])
             tab.line.fill.background()
 
-            add_text(slide, "ESTRUCTURA DEL ANÁLISIS", 8.8, 1.6, 3.3, 0.3, 10, theme["highlight"], True)
-            add_text(slide, "Contenido Ejecutivo", 8.8, 1.95, 3.3, 0.4, 15, theme["ink"], True)
+            add_text(slide, "ESTRUCTURA DEL CONTENIDO", 8.8, 1.6, 3.3, 0.3, 10, theme["highlight"], True)
+            add_text(slide, "Agenda Ejecutiva", 8.8, 1.95, 3.3, 0.4, 15, theme["ink"], True)
 
-            highlights = [
-                ("01", "Diagnóstico Técnico & Retos"),
-                ("02", "Métricas Cuantitativas & Impacto"),
-                ("03", "Pilares Estratégicos CIRCE"),
-                ("04", "Plan de Fases & Hoja de Ruta"),
-            ]
+            # Dinámicamente derivado de la agenda o de los títulos de las siguientes diapositivas
+            highlights = []
+            agenda_slide = next((s for s in slides if str(s.get("layout", "")).lower() == "agenda" and s.get("items")), None)
+            if agenda_slide:
+                for idx, item in enumerate(agenda_slide["items"][:4]):
+                    highlights.append((f"0{idx+1}", str(item)[:35]))
+            else:
+                for idx, s in enumerate(slides[1:5]):
+                    t = str(s.get("title", f"Sección 0{idx+1}"))[:35]
+                    highlights.append((f"0{idx+1}", t))
+
+            while len(highlights) < 4:
+                highlights.append((f"0{len(highlights)+1}", f"Punto Clave 0{len(highlights)+1}"))
+
             for hi, (num, htext) in enumerate(highlights):
                 top_h = 2.6 + hi * 0.72
                 dot = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(8.8), Inches(top_h), Inches(0.45), Inches(0.35))
@@ -953,7 +1082,7 @@ def create_presentation(topic: str, slides: list[dict], preferences: dict) -> st
                 dot.fill.fore_color.rgb = color(theme["secondary"])
                 dot.line.fill.background()
                 add_text(slide, num, 8.8, top_h + 0.05, 0.45, 0.28, 9, theme["ink"], True, align=PP_ALIGN.CENTER)
-                add_text(slide, htext, 9.4, top_h + 0.05, 2.8, 0.4, 11.5, theme["ink"], True)
+                add_text(slide, htext, 9.4, top_h + 0.05, 2.8, 0.4, 11, theme["ink"], True)
 
             date_str = time.strftime("%d de %B de %Y", time.localtime())
             add_text(slide, f"Fundación CIRCE · {date_str}", 8.8, 5.75, 3.3, 0.3, 9, theme["muted"])
@@ -1237,76 +1366,30 @@ def create_presentation(topic: str, slides: list[dict], preferences: dict) -> st
 
 
 def presentation_plan(message: str, preferences: dict, document_context: dict | None = None) -> list[dict]:
-    num_slides_pref = int(preferences.get("num_slides", 7))
-
-    fallback = [
-        {"layout": "cover", "title": message[:70], "subtitle": "Estrategia ejecutiva y análisis cuantitativo para CIRCE"},
-        {"layout": "agenda", "title": "Agenda y Enfoque Estratégico", "items": ["Diagnóstico y Contexto", "Solución Tecnológica", "Métricas y Retorno Cuantitativo", "Plan de Acción y Cronograma"]},
-        {
-            "layout": "stats",
-            "title": "Métricas y Rendimiento Esperado",
-            "subtitle": "Indicadores cuantitativos de impacto directo en la operación",
-            "stats": [
-                {"value": "-35%", "label": "Demanda Energética", "desc": "Reducción directa estimada mediante optimización local."},
-                {"value": "100%", "label": "Soberanía de Datos", "desc": "Privacidad y confidencialidad total sin exposición externa."},
-                {"value": "2.8x", "label": "Productividad", "desc": "Agilización en análisis documental y generación de informes."},
-            ],
-        },
-        {
-            "layout": "comparison",
-            "title": "Comparativa de Escenarios",
-            "subtitle": "Evaluación del estado actual frente a la propuesta tecnológica CIRCE",
-            "bullets": [
-                "Procesos manuales y dependencia de servicios en la nube con coste recurrente.",
-                "Riesgo de fuga de información corporativa y latencia en consultas técnicas.",
-                "Arquitectura local de alta concurrencia con semáforos de capacidad.",
-                "Generación automática de entregables ejecutivos en Word y PowerPoint.",
-            ],
-        },
-        {
-            "layout": "cards",
-            "title": "Ejes Estratégicos de Innovación",
-            "subtitle": "Pilares fundamentales para la adopción tecnológica en la organización",
-            "cards": [
-                {"title": "Arquitectura Local", "bullets": ["Inferencia GGUF cuantizada", "Concurrencia multihilo"]},
-                {"title": "Gobernanza & Seguridad", "bullets": ["Sin telemetría externa", "Conexión segura vía túnel"]},
-                {"title": "Impacto Operativo", "bullets": ["Documentos Word corporativos", "Diapositivas PPTX ejecutivas"]},
-            ],
-        },
-        {
-            "layout": "steps",
-            "title": "Plan de Implementación y Fases",
-            "subtitle": "Cronograma de ejecución estructurado para mitigar riesgos",
-            "steps": [
-                {"step": "01", "title": "Diagnóstico y Requisitos", "desc": "Mapeo de datos y validación de casos de uso prioritarios."},
-                {"step": "02", "title": "Validación en Piloto", "desc": "Despliegue en banco de pruebas con equipos técnicos clave."},
-                {"step": "03", "title": "Escalado Transversal", "desc": "Adopción operativa con monitorización y métricas en tiempo real."},
-            ],
-        },
-        {"kind": "closing", "layout": "closing", "title": "Conclusiones y Próximos Pasos", "subtitle": "Preguntas, debate y calendario de hitos"},
-    ]
+    clean_topic = clean_conversational_topic(message)
+    num_slides_pref = int(preferences.get("num_slides", 5))
 
     doc_extra = ""
     if document_context and document_context.get("text"):
         doc_extra = (
             f"Basate estrictamente en el siguiente documento adjunto ('{document_context.get('filename')}'):\n"
-            f"{document_context['text'][:12000]}\n\n"
+            f"{document_context['text'][:8000]}\n\n"
         )
 
     prompt = (
-        "Devuelve SOLO JSON valido, sin markdown ni texto extra, con este esquema exacto:\n"
-        '{"slides":[\n'
-        '  {"layout":"cover","title":"...","subtitle":"..."},\n'
-        '  {"layout":"agenda","title":"Agenda","items":["...","...","..."]},\n'
-        '  {"layout":"stats","title":"Metricas Clave","subtitle":"...","stats":[{"value":"...","label":"...","desc":"..."}]},\n'
-        '  {"layout":"comparison","title":"Reto vs Solucion","subtitle":"...","bullets":["...","...","...","..."]},\n'
-        '  {"layout":"cards","title":"Ejes Tecnologicos","cards":[{"title":"...","bullets":["...","..."]}]},\n'
-        '  {"layout":"steps","title":"Hoja de Ruta","steps":[{"step":"01","title":"...","desc":"..."}]},\n'
-        '  {"kind":"closing","layout":"closing","title":"Cierre y Proximos Pasos","subtitle":"..."}\n'
-        ']}\n'
-        f"Genera exactamente {num_slides_pref} diapositivas de nivel ejecutivo para consultoría estratégica sobre este tema: '{message}'.\n"
-        f"Tono: {preferences.get('tone', 'profesional')}. Densidad: {preferences.get('density', 'medio')}.\n"
+        f"Genera exactamente {num_slides_pref} diapositivas de nivel profesional y ejecutivo sobre el tema: '{clean_topic}'.\n"
         f"{doc_extra}"
+        "Estructura JSON requerida obligatoriamente (sin texto antes ni después del JSON):\n"
+        '{\n'
+        '  "slides": [\n'
+        f'    {{"layout": "cover", "title": "{clean_topic}", "subtitle": "Subtítulo conciso y atractivo", "category": "PRESENTACIÓN EJECUTIVA"}},\n'
+        '    {"layout": "agenda", "title": "Agenda", "items": ["Punto 1", "Punto 2", "Punto 3", "Punto 4"]},\n'
+        '    {"layout": "cards", "title": "Aspectos Clave", "cards": [{"title": "Pilar A", "bullets": ["Detalle 1", "Detalle 2"]}]},\n'
+        '    {"layout": "steps", "title": "Paso a Paso o Fases", "steps": [{"step": "01", "title": "Paso 1", "desc": "Descripción detallada"}]},\n'
+        '    {"kind": "closing", "layout": "closing", "title": "Conclusión", "subtitle": "Resumen final", "bullets": ["Punto clave 1", "Punto clave 2"]}\n'
+        '  ]\n'
+        '}\n'
+        f"El contenido de CADA diapositiva debe ser específico, útil y pertinente sobre '{clean_topic}'."
     )
 
     try:
@@ -1316,12 +1399,20 @@ def presentation_plan(message: str, preferences: dict, document_context: dict | 
             parsed = json.loads(raw[start : end + 1])
             slides = parsed.get("slides", [])
             if slides and all(isinstance(s, dict) for s in slides):
+                # Asegurar que el título de la portada no sea una fuga de instrucciones
+                if slides[0].get("layout") == "cover":
+                    t = str(slides[0].get("title", ""))
+                    if not t or any(b in t.lower() for b in ["devuelve", "json", "valido", "esquema"]):
+                        slides[0]["title"] = clean_topic
+                    if not slides[0].get("subtitle"):
+                        slides[0]["subtitle"] = f"Análisis y guía detallada sobre {clean_topic}"
                 if slides[-1].get("kind") != "closing" and slides[-1].get("layout") != "closing":
-                    slides.append({"kind": "closing", "layout": "closing", "title": "Cierre", "subtitle": "Preguntas y próximos pasos"})
+                    slides.append({"kind": "closing", "layout": "closing", "title": "Conclusión", "subtitle": f"Puntos clave sobre {clean_topic}"})
                 return slides
-    except Exception:
-        pass
-    return fallback
+    except Exception as e:
+        print(f"[!] Error generando plan con IA: {e}")
+
+    return build_contextual_fallback_slides(clean_topic, preferences, document_context)
 
 
 def generate_presentation(message: str, preferences: dict, document_context: dict | None = None) -> tuple[str, str]:
@@ -1598,14 +1689,22 @@ class Handler(BaseHTTPRequestHandler):
             if presentation_topic or is_presentation_intent(message):
                 is_presentation = True
                 topic_source = presentation_topic or message
-                if len(message.split()) <= 6 and ("esto" in message.lower() or "anterior" in message.lower() or "documento" in message.lower()):
+
+                is_continuation_cmd = (
+                    len(message.split()) <= 6
+                    and any(w in message.lower() for w in ("esto", "anterior", "documento", "conviertelo", "conviértelo", "pásalo", "pasalo", "hazla", "creala", "generala"))
+                ) or (len(clean_conversational_topic(message).split()) <= 1 and not presentation_topic)
+
+                if is_continuation_cmd:
                     if document_context:
                         topic_source = f"Análisis de {document_context.get('filename')}"
                     elif last_user_query:
-                        topic_source = last_user_query
+                        topic_source = clean_conversational_topic(last_user_query)
                     elif last_assistant_content:
                         first_line = last_assistant_content.splitlines()[0].replace("#", "").strip()
-                        topic_source = first_line[:80] or "Presentación Ejecutiva CIRCE"
+                        topic_source = clean_conversational_topic(first_line[:80]) or "Presentación Ejecutiva"
+                else:
+                    topic_source = clean_conversational_topic(topic_source)
 
                 filename, reply = generate_presentation(topic_source, presentation_preferences, document_context)
                 download_url = f"/generated/{filename}"
