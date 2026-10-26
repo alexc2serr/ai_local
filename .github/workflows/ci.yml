@@ -45,3 +45,4 @@ jobs:
         docx = server.create_docx_report('Test Informe', '# Titulo\n\nContenido de prueba', 'Energia')
         print('Automated CI Test: PPTX and DOCX generation passed!')
         "
+
