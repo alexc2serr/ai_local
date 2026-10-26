@@ -353,7 +353,7 @@ function App() {
                             <strong>Presentación PowerPoint generada</strong>
                             <small>Diseño ejecutivo de consultoría con infografías, métricas y portada CIRCE</small>
                           </div>
-                          <a className="download-action-btn" href={message.downloadUrl}>
+                          <a className="download-action-btn" href={message.downloadUrl} download>
                             Descargar PPTX <span>↓</span>
                           </a>
                         </div>
@@ -366,7 +366,7 @@ function App() {
                             <strong>Informe Word (.docx) preparado</strong>
                             <small>Estructura ejecutiva formal con plantilla institucional CIRCE</small>
                           </div>
-                          <a className="download-action-btn" href={message.docxDownloadUrl}>
+                          <a className="download-action-btn" href={message.docxDownloadUrl} download>
                             Descargar Word <span>↓</span>
                           </a>
                         </div>

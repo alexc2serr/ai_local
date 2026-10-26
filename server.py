@@ -7,8 +7,9 @@ import os
 import re
 import threading
 import time
+import unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, unquote, quote
 from urllib.request import Request, urlopen
 
 import docx
@@ -413,6 +414,13 @@ def ollama_chat(
     request = Request(f"{OLLAMA_URL}/api/chat", data=payload, headers={"Content-Type": "application/json"})
     with urlopen(request, timeout=timeout_secs) as response:
         return json.loads(response.read().decode("utf-8"))["message"]["content"]
+
+
+def slugify_ascii(text: str) -> str:
+    nfkd = unicodedata.normalize("NFKD", text)
+    ascii_text = nfkd.encode("ASCII", "ignore").decode("ASCII")
+    slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", ascii_text).strip("-").lower()
+    return slug[:45] or "documento"
 
 
 def clean_conversational_topic(message: str) -> str:
@@ -905,7 +913,7 @@ def create_docx_report(title: str, markdown_content: str, topic: str = "", metad
             p.paragraph_format.line_spacing = 1.15
             _add_formatted_runs(p, stripped)
 
-    safe_title = re.sub(r"[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ_-]+", "-", doc_title).strip("-").lower()[:45] or "informe-circe"
+    safe_title = slugify_ascii(doc_title) or "informe-circe"
     filename = f"{safe_title}-{int(time.time())}.docx"
     doc.save(os.path.join(OUTPUT_DIR, filename))
     return filename
@@ -1362,7 +1370,7 @@ def create_presentation(topic: str, slides: list[dict], preferences: dict) -> st
         add_text(slide, "FUNDACIÓN CIRCE · CENTRO TECNOLÓGICO · Conocimiento que se convierte en acción", 0.9, 6.85, 8.5, 0.25, 8, theme["muted"])
         add_text(slide, "Documento Confidencial · Procesado 100% Local", 8.5, 6.85, 3.9, 0.25, 8, theme["muted"], align=PP_ALIGN.RIGHT)
 
-    safe_topic = re.sub(r"[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ_-]+", "-", topic).strip("-").lower()[:50] or "presentacion"
+    safe_topic = slugify_ascii(topic) or "presentacion"
     filename = f"{safe_topic}-{int(time.time())}.pptx"
     presentation.save(os.path.join(OUTPUT_DIR, filename))
     return filename
@@ -1484,10 +1492,36 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, data)
             return
 
-        if path.startswith("/generated/"):
-            filename = os.path.basename(path.removeprefix("/generated/"))
-            file_path = os.path.join(OUTPUT_DIR, filename)
-            if os.path.isfile(file_path):
+        decoded_path = unquote(path)
+        if path.startswith("/generated/") or decoded_path.startswith("/generated/"):
+            raw_sub = path.removeprefix("/generated/")
+            dec_sub = decoded_path.removeprefix("/generated/")
+            
+            cand_filenames = [
+                os.path.basename(dec_sub),
+                os.path.basename(raw_sub),
+                slugify_ascii(dec_sub),
+            ]
+            
+            file_path = None
+            for cand in cand_filenames:
+                p = os.path.join(OUTPUT_DIR, cand)
+                if os.path.isfile(p):
+                    file_path = p
+                    break
+            
+            # Si no coincide exacto, buscar coincidencia parcial por timestamp en OUTPUT_DIR
+            if not file_path:
+                ts_match = re.search(r"(\d{10})", dec_sub)
+                if ts_match:
+                    ts = ts_match.group(1)
+                    for f in os.listdir(OUTPUT_DIR):
+                        if ts in f and os.path.isfile(os.path.join(OUTPUT_DIR, f)):
+                            file_path = os.path.join(OUTPUT_DIR, f)
+                            break
+
+            if file_path and os.path.isfile(file_path):
+                filename = os.path.basename(file_path)
                 with open(file_path, "rb") as generated_file:
                     body = generated_file.read()
 
@@ -1501,15 +1535,17 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     content_type = "application/octet-stream"
 
+                ascii_fn = unicodedata.normalize("NFKD", filename).encode("ASCII", "ignore").decode("ASCII") or "archivo"
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
-                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+                self.send_header("Content-Disposition", f'attachment; filename="{ascii_fn}"; filename*=UTF-8\'\'{quote(filename)}')
                 self.send_header("Content-Length", str(len(body)))
                 self.send_cors_headers()
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            self.send_json(404, {"error": "file not found"})
+
+            self.send_json(404, {"error": "Archivo no encontrado", "solicitado": dec_sub})
             return
 
         # Serve static assets from Vite dist/ build if available
