@@ -1105,11 +1105,14 @@ def create_presentation(topic: str, slides: list[dict], preferences: dict) -> st
             add_text(slide, str(slide_data.get("title", "Conclusiones y Hoja de Ruta")), 5.6, 1.3, 6.8, 0.7, 26, theme["ink"], True)
             add_text(slide, str(slide_data.get("subtitle", "Actuaciones inmediatas para la toma de decisiones")), 5.6, 2.05, 6.8, 0.4, 13, theme["muted"])
 
-            bullets = slide_data.get("bullets", [
-                "Validar los requerimientos técnicos y alcance con los equipos especializados.",
-                "Priorizar los casos de uso con mayor retorno energético y operativo.",
-                "Establecer el calendario de hitos y el comité de seguimiento.",
-            ])
+            bullets = slide_data.get("bullets")
+            if not bullets:
+                clean_t = clean_conversational_topic(topic)
+                bullets = [
+                    f"Consolidar las conclusiones y aprendizajes clave sobre {clean_t[:35]}.",
+                    "Aplicar las recomendaciones prácticas en las siguientes fases.",
+                    "Hacer seguimiento continuo de los resultados obtenidos.",
+                ]
             for bi, b in enumerate(bullets[:3]):
                 top_b = 2.85 + bi * 1.25
                 b_card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(5.6), Inches(top_b), Inches(6.8), Inches(1.05))
@@ -1406,7 +1409,8 @@ def presentation_plan(message: str, preferences: dict, document_context: dict | 
                         slides[0]["title"] = clean_topic
                     if not slides[0].get("subtitle"):
                         slides[0]["subtitle"] = f"Análisis y guía detallada sobre {clean_topic}"
-                if slides[-1].get("kind") != "closing" and slides[-1].get("layout") != "closing":
+                has_closing = any(s.get("kind") == "closing" or s.get("layout") == "closing" for s in slides)
+                if not has_closing:
                     slides.append({"kind": "closing", "layout": "closing", "title": "Conclusión", "subtitle": f"Puntos clave sobre {clean_topic}"})
                 return slides
     except Exception as e:
