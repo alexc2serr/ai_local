@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: circe-local-ai-lab
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: frankfurt
+    healthCheckPath: /api/health
+    envVars:
+      - key: DEMO_MODE
+        value: "true"
+      - key: MODEL_NAME
+        value: "llama3.2:3b"
+      - key: PRESENTATION_MODEL
+        value: "qwen2.5:7b"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: PORT
+        value: "8080"

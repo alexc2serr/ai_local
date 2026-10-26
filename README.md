@@ -72,21 +72,53 @@ Cloudflare generará un enlace público HTTPS seguro (`https://xxxx.trycloudflar
 
 El modo demo es intencional: permite validar interfaz, permisos y despliegue antes de consumir memoria del modelo.
 
-## Crear presentaciones automaticamente
+## Trabajo Avanzado con Documentos y Presentaciones
 
-Escribe en el chat, por ejemplo: `Crea una presentación sobre la tecnología y su impacto en la industria`. La API detecta la intención, pide al modelo un esquema estructurado y genera un archivo `.pptx` descargable. No hay que cambiar de modelo manualmente.
+### 1. Procesamiento y Análisis de Documentos (PDF, Word DOCX, TXT)
 
-Antes de generarla, la interfaz pregunta por la paleta (`Verde CIRCE`, `Azul técnico`, `Cálida` o `Monocroma`) y el tono (`Profesional`, `Divulgativo`, `Creativo` o `Sarcástico`). El PowerPoint aplica una composición visual con portada, color de marca, tarjetas de contenido, numeración, jerarquía tipográfica y pie de página.
+- **Adjuntar documentos locales**: Pulsa el botón `+` o el botón `📎 Adjuntar Documento` en la barra superior para cargar archivos PDF, Word (`.docx`) o de texto plano (`.txt`, `.md`).
+- **Extracción local privada**: El backend procesa el documento en memoria mediante `pypdf` y `python-docx` sin enviar información a ningún servicio externo ni salir de la red local.
+- **Acciones rápidas en un clic**:
+  - `📋 Resumen Ejecutivo`: Estructura un resumen con puntos clave, datos cuantitativos y conclusiones accionables.
+  - `🔍 Análisis Técnico`: Evaluación crítica de requisitos, fortalezas, riesgos y metodología.
+  - `📊 Convertir en Presentación PPTX`: Genera automáticamente una presentación PowerPoint basada en los contenidos y conclusiones del documento.
+  - `📝 Redactar Informe Word`: Genera un informe formal estructurado listo para exportar a `.docx`.
 
-Para el portátil, `llama3.2:3b` sirve para probar el flujo. Para mejorar la generación de JSON y contenido de diapositivas, usa un modelo instruct de 7B cuantizado:
+### 2. Exportación Conversacional a Microsoft Word (.docx)
+
+- **Comandos conversacionales naturales**: En cualquier momento de la conversación, pídele al asistente:
+  - *"Expórtalo a Word"* o *"Pásalo a Word"*
+  - *"Redacta un informe formal sobre esto en Word"*
+  El asistente toma el contenido previo o genera el informe técnico y adjunta la tarjeta de descarga del archivo `.docx` directamente en el chat.
+- **Plantilla corporativa CIRCE**: Encabezados institucionales (*Fundación CIRCE · Centro Tecnológico*), caja de metadatos, tipografía calibrada, colores corporativos (Verde CIRCE `#108554`, Azul técnico `#2369A5`), listas con viñetas y pie de página de confidencialidad.
+
+### 3. Crear Presentaciones PowerPoint (.pptx) de Nivel Consultoría Ejecutiva
+
+- **Generación conversacional sin modales rígidos**:
+  Pídele al chat de forma fluida:
+  - *"Conviértelo en presentación"* o *"Haz unas diapositivas sobre esto"*
+  - *"Crea una presentación ejecutiva de 5 diapositivas en azul sobre descarbonización"*
+  El modelo detectará automáticamente la paleta, el número de diapositivas y el contenido a transformar.
+- **Diseño visual avanzado con 7 tipos de diapositivas de consultoría**:
+  1. `Portada Hero`: composición asimétrica con panel oscuro contrastado, marca CIRCE, título de alto impacto, subtítulo y tarjeta de índice lateral.
+  2. `Agenda Ejecutiva`: pipeline horizontal o tarjetas numeradas con badges de sección.
+  3. `Métricas de Impacto (Estilo McKinsey/BCG)`: tarjetas con números gigantes (`48pt`), pestañas de color superior, nombres de métricas en mayúsculas y descripción de impacto.
+  4. `Comparativa de Escenarios (Reto vs Solución)`: 2 columnas contrastadas con indicadores de alerta y checkmarks de solución tecnológica CIRCE.
+  5. `Pilares Estratégicos`: 3 columnas con bandas de cabecera coloreadas y viñetas estructuradas.
+  6. `Hoja de Ruta y Fases`: línea de progresión continua con hitos numerados (`01`, `02`, `03`) y entregables.
+  7. `Cierre y Plan de Acción`: panel de identidad corporativa CIRCE con 3 pasos de acción inmediatos y contacto.
+- **Personalización interactiva**:
+  - **Paletas de color**: `Verde CIRCE`, `Azul técnico`, `Cálida / Energía`, `Púrpura Innovación` y `Monocroma`.
+  - **Número de diapositivas**: `Breve (5)`, `Estándar (7)` o `Detallada (10)`.
+  - **Tono y densidad**: Ajustable entre profesional, técnico, divulgativo y sintético.
+
+Para mejorar la precisión en presentaciones y documentos complejos en local, se recomienda el modelo instruct:
 
 ```powershell
 ollama pull qwen2.5:7b
 ```
 
-Añade `PRESENTATION_MODEL=qwen2.5:7b` en `.env` y reinicia `server.py`. La aplicación seleccionará ese modelo automáticamente solo para presentaciones. En el rack se puede sustituir por un modelo mayor sin cambiar la interfaz.
-
-La generación PowerPoint es local. Google Slides requiere añadir OAuth y la API de Google, porque el documento se crea en la cuenta de Google y no puede hacerse completamente offline. El mismo esquema de diapositivas puede reutilizarse para ese adaptador.
+Añade `PRESENTATION_MODEL=qwen2.5:7b` en `.env` y reinicia `server.py`.
 
 # React + TypeScript + Vite
 

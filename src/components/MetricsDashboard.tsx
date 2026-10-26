@@ -539,12 +539,13 @@ export function MetricsDashboard({ clientId, onBackToChat }: { clientId: string;
                 Para permitir que 5 o más personas de CIRCE se conecten desde cualquier equipo o portátil sin abrir puertos en el router:
               </p>
               <div className="cf-code-block">
-                <code>cloudflared tunnel --url http://localhost:8080</code>
+                <code>cloudflared tunnel --protocol http2 --url http://localhost:8080</code>
               </div>
               <ul className="cf-features">
+                <li>✓ <strong>--protocol http2</strong>: Evita el bloqueo del puerto 7844 en firewalls corporativos.</li>
                 <li>✓ Acceso HTTPS con certificado SSL automático sin coste.</li>
                 <li>✓ El puerto 8080 sirve tanto el frontend React compilado como el backend Python.</li>
-                <li>✓ Soporta conexiones simultáneas con aislamiento por usuario (Client ID).</li>
+                <li>✓ Alternativa en LAN: comparte tu IP local (ej. <code>http://192.168.x.x:8080</code>).</li>
               </ul>
             </div>
           </div>

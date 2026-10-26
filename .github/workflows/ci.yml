@@ -1,0 +1,47 @@
+name: Build & Test CIRCE Local AI Lab
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: 'npm'
+
+    - name: Install Node dependencies & Build Frontend
+      run: |
+        npm install
+        npm run build
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install Python dependencies
+      run: |
+        pip install -r requirements.txt
+
+    - name: Validate Python server syntax & unit test
+      run: |
+        python -m py_compile server.py
+        DEMO_MODE=true python -c "
+        import server
+        slides = server.presentation_plan('Test CIRCE', {'palette': 'circe'})
+        pptx = server.create_presentation('Test CIRCE', slides, {'palette': 'circe'})
+        docx = server.create_docx_report('Test Informe', '# Titulo\n\nContenido de prueba', 'Energia')
+        print('Automated CI Test: PPTX and DOCX generation passed!')
+        "
